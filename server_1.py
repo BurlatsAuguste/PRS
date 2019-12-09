@@ -9,32 +9,25 @@ def send_file(port, step):
     filename, address = sock_client.recvfrom(1024)
     print("received :", filename.decode('utf-8'))
 
-    file = open(filename.decode('utf-8').rstrip('\0'), 'rb')
+    file = open('files/'+filename.decode('utf-8').rstrip('\0'), 'rb')
 
     content = file.read()
 
     i = 0
-    #MESSAGE = bytes(content, 'utf-8')
     NUM_SEQ = 1
     print("len = ", len(content))
     while i * step <= len(content):
         print("i = ", i)
         end = (i + 1) * step if (i + 1 * step) < len(content) else len(content)
-        SEQ = bytes(str(NUM_SEQ).zfill(6), 'utf-8');
-        #SEQ = bytes(str(NUM_SEQ).zfill(6) + content[i * step:end].decode('utf-8'), 'utf-8')
+        SEQ = bytes(str(NUM_SEQ).zfill(6), 'utf-8')
         SEQ += content[i * step:end]
         print("send : ", NUM_SEQ)
         sock_client.sendto(SEQ, address)
         try :
             data, address = sock_client.recvfrom(1024)
             print("received :", data.decode('utf-8'))
-            if(data.decode('utf-8').rstrip('\0') != "ACK"+str(NUM_SEQ).zfill(6)):
+            if data.decode('utf-8').rstrip('\0') != "ACK"+str(NUM_SEQ).zfill(6):
                 NUM_SEQ += -1
-            #while data.decode('utf-8').rstrip('\0') != "ACK"+str(NUM_SEQ).zfill(6):
-                #sock_client.sendto(SEQ, address)
-                #print("send : ", NUM_SEQ)
-                #data, address = sock_client.recvfrom(1024)
-                #print("received :", data.decode('utf-8'))
             else:
                 i += 1
                 NUM_SEQ += 1

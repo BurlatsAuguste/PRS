@@ -1,4 +1,4 @@
 copy_*
-files/
+files/*
 
 .idea
