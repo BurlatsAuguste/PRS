@@ -1,20 +1,40 @@
 import socket
 import threading
+import time
 from sys import argv
+import statistics
+
+Tab_ACK_lock = threading.Lock()
+RTT_lock = threading.Lock()
+
+def listen(sock_client, ACK_tab, RTT_records):
+    while(1):
+        #we listen the socket to receive ACKs
+        data_ack, address = sock_client.recvfrom(1024)
+        print("received :", data_ack.decode('utf-8'))
+        message = data_ack.decode('utf-8').rstrip('\0')
+        index = int(message[3::]) - 1
+        with Tab_ACK_lock and RTT_lock:
+            for i in range(index):
+                ACK_tab[i][0] = True
+            #RTT_records.append(time.time() - ACK_tab[index][1])
 
 
 def send_file(socket_port, packet_length):
     # socket initialization
     sock_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock_client.bind((UDP_IP, socket_port))
-    sock_client.settimeout(0.1)
+
+    RTT = 0.1
+    RTT_records = []
+    cwnd = 5
+    Tab_ACK = []
 
     # file initialization
     filename, address = sock_client.recvfrom(1024)
     print("received :", filename.decode('utf-8'))
     file = open('files/' + filename.decode('utf-8').rstrip('\0'), 'rb')
     content = file.read()
-
     step = 0
     NUM_SEG = 1  # the number of the segment
 
@@ -27,29 +47,47 @@ def send_file(socket_port, packet_length):
         # we create the segment number on 6 bytes then we add the content of the file
         SEG = bytes(str(NUM_SEG).zfill(6), 'utf-8')
         SEG += content[step * packet_length:end]
-        print("send : ", NUM_SEG)
-        sock_client.sendto(SEG, address)
+        Tab_ACK.append([False, 0, SEG])
+        NUM_SEG +=1
+        step += 1
+    print("taille tableau = ",len(Tab_ACK))
 
-        # we need to use a try except block because of the timeout on the socket, which allows us to
-        # send the packet again if lost
-        try:
-            data_ack, address = sock_client.recvfrom(1024)
-            print("received :", data_ack.decode('utf-8'))
+    #we start a thread to listen the socket
+    thread = threading.Thread(target=listen, args=(sock_client, Tab_ACK, RTT_records))
+    thread.start()
+    Last_Segment = False
+    NUM_SEG = 1
 
-            # if the segment number does not match the ACK number we stay at the same segment number
-            # else we go to the next one
-            if data_ack.decode('utf-8').rstrip('\0') != "ACK" + str(NUM_SEG).zfill(6):
-                NUM_SEG += -1
-            else:
-                step += 1
+
+    while(NUM_SEG < len(Tab_ACK) and Last_Segment == False):
+        with Tab_ACK_lock:
+            #if we received the ACK of the first window's packet we slice the window
+            if(Tab_ACK[NUM_SEG - 1][0] == True):
                 NUM_SEG += 1
-        except socket.timeout:
-            print("no ACK received, trying sending again")
+
+        #we run through the window to launch the segments
+        for i in range(cwnd):
+            if((i+NUM_SEG) > len(Tab_ACK)):
+                break
+            with Tab_ACK_lock:
+                if((Tab_ACK[i+NUM_SEG - 1][0] == False) and (time.time() - Tab_ACK[i+NUM_SEG-1][1] > RTT)):
+                    print("send : ", i+NUM_SEG)
+                    sock_client.sendto(Tab_ACK[i+NUM_SEG-1][2], address)
+                    Tab_ACK[i+NUM_SEG-1][1] = time.time()
+
+        try:
+            with RTT_lock:
+                RTT = statistics.mean(RTT_records)+1
+        except statistics.StatisticsError:
             continue
+
+        with Tab_ACK_lock:
+            Last_Segment = Tab_ACK[len(Tab_ACK) - 1][0]
 
     # when we reach the end of the content we send a message "FIN" to the client to end the communication
     MESSAGE_FIN = bytes("FIN", 'utf-8')
     sock_client.sendto(MESSAGE_FIN, address)
+    thread.join()
 
 
 if __name__ == "__main__":
