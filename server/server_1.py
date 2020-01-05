@@ -3,6 +3,7 @@ import threading
 import time
 from sys import argv
 import statistics
+from math import floor
 
 Tab_ACK_lock = threading.Lock()
 RTT_lock = threading.Lock()
@@ -16,7 +17,7 @@ def listen(sock_client, ACK_tab, RTT_records):
         index = int(message[3::])
         with Tab_ACK_lock and RTT_lock:
             for i in range(index):
-                ACK_tab[i][0] = True
+                ACK_tab[i][0] += 1
             #RTT_records.append(time.time() - ACK_tab[index][1])
 
 
@@ -49,7 +50,7 @@ def send_file(socket_port, packet_length):
         # we create the segment number on 6 bytes then we add the content of the file
         SEG = bytes(str(NUM_SEG).zfill(6), 'utf-8')
         SEG += content[step * packet_length:end]
-        Tab_ACK.append([False, 0, SEG, False])
+        Tab_ACK.append([0, 0, SEG, False])
         NUM_SEG +=1
         step += 1
     print("taille tableau = ",len(Tab_ACK))
@@ -64,12 +65,15 @@ def send_file(socket_port, packet_length):
     while(NUM_SEG < len(Tab_ACK) and Last_Segment == False):
         with Tab_ACK_lock:
             #if we received the ACK of the first window's packet we slice the window
-            while(Tab_ACK[NUM_SEG - 1][0] == True and NUM_SEG < len(Tab_ACK)):
+            while(Tab_ACK[NUM_SEG - 1][0] > 0 and NUM_SEG < len(Tab_ACK)):
                 NUM_SEG += 1
-                #cwnd += 1
+                if(cwnd <= ssthresh):
+                    cwnd += 1
+                else:
+                    cwnd += 1/floor(cwnd)
 
         #we run through the window to launch the segments
-        for i in range(cwnd):
+        for i in range(int(cwnd)):
             if((i+NUM_SEG) > len(Tab_ACK)):
                 break
             with Tab_ACK_lock:
@@ -80,19 +84,20 @@ def send_file(socket_port, packet_length):
                     Tab_ACK[i+NUM_SEG-1][3] = True
                     Tab_ACK[i+NUM_SEG-1][1] = time.time()
                 #if we detect a loss we resend the lost segment
-                elif((Tab_ACK[i+NUM_SEG - 1][0] == False) and (time.time() - Tab_ACK[i+NUM_SEG-1][1] > RTT)):
+                elif((Tab_ACK[i+NUM_SEG - 1][0] == 0) and ((time.time() - Tab_ACK[i+NUM_SEG-1][1] > RTT) or Tab_ACK[i+NUM_SEG-2][0] > 3)):
                     print("loss detected")
                     print("send : ", i+NUM_SEG)
                     sock_client.sendto(Tab_ACK[i+NUM_SEG-1][2], address)
                     Tab_ACK[i+NUM_SEG-1][1] = time.time()
                     ssthresh = 0
-                    for j in range(cwnd):
-                        if((i+NUM_SEG) > len(Tab_ACK)):
+                    for j in range(int(cwnd)):
+                        if((j+NUM_SEG) > len(Tab_ACK)):
                             break
-                        if (Tab_ACK[j+NUM_SEG - 1][3] == True and Tab_ACK[j+NUM_SEG - 1][0] == False):
+                        if (Tab_ACK[j+NUM_SEG - 1][3] == True and Tab_ACK[j+NUM_SEG - 1][0] == 0):
                             ssthresh += 1
                     ssthresh = ssthresh/2
                     print("--------ssthresh = ", ssthresh)
+                    cwnd = int(ssthresh) if ssthresh > 5 else 5
                     break
 
         try:
@@ -144,7 +149,7 @@ if __name__ == "__main__":
 
         # we start the thread before sending the SYN-ACK because the thread can take too much time to start
         # and the client try to connect to a socket that does not exist yet, causing an error
-        thread = threading.Thread(target=send_file, args=(int(port_new), 1024))
+        thread = threading.Thread(target=send_file, args=(int(port_new), 1494))
         thread.start()
 
         # sending the SYN-ACK to the client with the new port number
