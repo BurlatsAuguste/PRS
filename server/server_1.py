@@ -13,7 +13,7 @@ def listen(sock_client, ACK_tab, RTT_records):
         data_ack, address = sock_client.recvfrom(1024)
         print("received :", data_ack.decode('utf-8'))
         message = data_ack.decode('utf-8').rstrip('\0')
-        index = int(message[3::]) - 1
+        index = int(message[3::])
         with Tab_ACK_lock and RTT_lock:
             for i in range(index):
                 ACK_tab[i][0] = True
@@ -25,9 +25,11 @@ def send_file(socket_port, packet_length):
     sock_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock_client.bind((UDP_IP, socket_port))
 
+    SlowStart = True #if SlowStart is False, then we use Congestion Avoidance
     RTT = 0.1
     RTT_records = []
-    cwnd = 5
+    cwnd = 10
+    ssthresh = 100
     Tab_ACK = []
 
     # file initialization
@@ -47,7 +49,7 @@ def send_file(socket_port, packet_length):
         # we create the segment number on 6 bytes then we add the content of the file
         SEG = bytes(str(NUM_SEG).zfill(6), 'utf-8')
         SEG += content[step * packet_length:end]
-        Tab_ACK.append([False, 0, SEG])
+        Tab_ACK.append([False, 0, SEG, False])
         NUM_SEG +=1
         step += 1
     print("taille tableau = ",len(Tab_ACK))
@@ -62,18 +64,36 @@ def send_file(socket_port, packet_length):
     while(NUM_SEG < len(Tab_ACK) and Last_Segment == False):
         with Tab_ACK_lock:
             #if we received the ACK of the first window's packet we slice the window
-            if(Tab_ACK[NUM_SEG - 1][0] == True):
+            while(Tab_ACK[NUM_SEG - 1][0] == True and NUM_SEG < len(Tab_ACK)):
                 NUM_SEG += 1
+                #cwnd += 1
 
         #we run through the window to launch the segments
         for i in range(cwnd):
             if((i+NUM_SEG) > len(Tab_ACK)):
                 break
             with Tab_ACK_lock:
-                if((Tab_ACK[i+NUM_SEG - 1][0] == False) and (time.time() - Tab_ACK[i+NUM_SEG-1][1] > RTT)):
+                #If one segment has never been sent we send it
+                if(Tab_ACK[i+NUM_SEG - 1][3] == False):
+                    print("send : ", i+NUM_SEG)
+                    sock_client.sendto(Tab_ACK[i+NUM_SEG-1][2], address)
+                    Tab_ACK[i+NUM_SEG-1][3] = True
+                    Tab_ACK[i+NUM_SEG-1][1] = time.time()
+                #if we detect a loss we resend the lost segment
+                elif((Tab_ACK[i+NUM_SEG - 1][0] == False) and (time.time() - Tab_ACK[i+NUM_SEG-1][1] > RTT)):
+                    print("loss detected")
                     print("send : ", i+NUM_SEG)
                     sock_client.sendto(Tab_ACK[i+NUM_SEG-1][2], address)
                     Tab_ACK[i+NUM_SEG-1][1] = time.time()
+                    ssthresh = 0
+                    for j in range(cwnd):
+                        if((i+NUM_SEG) > len(Tab_ACK)):
+                            break
+                        if (Tab_ACK[j+NUM_SEG - 1][3] == True and Tab_ACK[j+NUM_SEG - 1][0] == False):
+                            ssthresh += 1
+                    ssthresh = ssthresh/2
+                    print("--------ssthresh = ", ssthresh)
+                    break
 
         try:
             with RTT_lock:
@@ -86,7 +106,8 @@ def send_file(socket_port, packet_length):
 
     # when we reach the end of the content we send a message "FIN" to the client to end the communication
     MESSAGE_FIN = bytes("FIN", 'utf-8')
-    sock_client.sendto(MESSAGE_FIN, address)
+    for i in range(10):
+        sock_client.sendto(MESSAGE_FIN, address)
     thread.join()
 
 
