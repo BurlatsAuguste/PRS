@@ -8,16 +8,15 @@ from math import floor
 Tab_ACK_lock = threading.Lock()
 RTT_lock = threading.Lock()
 
-def listen(sock_client, ACK_tab, RTT_records):
+def listen(sock_client, ACK_tab):
     while(1):
         #we listen the socket to receive ACKs
         data_ack, address = sock_client.recvfrom(1024)
         print("received :", data_ack.decode('utf-8'))
         message = data_ack.decode('utf-8').rstrip('\0')
         index = int(message[3::])
-        with Tab_ACK_lock and RTT_lock:
-            for i in range(index):
-                ACK_tab[i][0] += 1
+        for i in range(index):
+            ACK_tab[i][0] += 1
 
 
 def send_file(socket_port, packet_length):
@@ -52,57 +51,54 @@ def send_file(socket_port, packet_length):
         step += 1
 
     #we start a thread to listen the socket
-    thread = threading.Thread(target=listen, args=(sock_client, Tab_ACK, RTT_records))
+    thread = threading.Thread(target=listen, args=(sock_client, Tab_ACK))
     thread.start()
     Last_Segment = False
     NUM_SEG = 1
 
 
     while(NUM_SEG < len(Tab_ACK) and Last_Segment == 0):
-        with Tab_ACK_lock:
-            #if we received the ACK of the first window's packet we slice the window
-            while(Tab_ACK[NUM_SEG - 1][0] > 0 and NUM_SEG < len(Tab_ACK)):
-                NUM_SEG += 1
-                if(cwnd <= ssthresh): #Slow Start
-                    cwnd += 1
-                else: #Congestion Avoidance
-                    cwnd += 1/floor(cwnd)
+        #if we received the ACK of the first window's packet we slice the window
+        while(Tab_ACK[NUM_SEG - 1][0] > 0 and NUM_SEG < len(Tab_ACK)):
+            NUM_SEG += 1
+            if(cwnd <= ssthresh): #Slow Start
+                cwnd += 1
+            else: #Congestion Avoidance
+                cwnd += 1/floor(cwnd)
 
         #we run through the window to launch the segments
         for i in range(int(cwnd)):
             if((i+NUM_SEG) > len(Tab_ACK)):
                 break
-            with Tab_ACK_lock:
 
-                #If one segment has never been sent we send it
-                if(Tab_ACK[i+NUM_SEG - 1][3] == False):
-                    print("send : ", i+NUM_SEG)
-                    sock_client.sendto(Tab_ACK[i+NUM_SEG-1][2], address)
-                    Tab_ACK[i+NUM_SEG-1][3] = True
-                    Tab_ACK[i+NUM_SEG-1][1] = time.time()
+            #If one segment has never been sent we send it
+            if(Tab_ACK[i+NUM_SEG - 1][3] == False):
+                print("send : ", i+NUM_SEG)
+                sock_client.sendto(Tab_ACK[i+NUM_SEG-1][2], address)
+                Tab_ACK[i+NUM_SEG-1][3] = True
+                Tab_ACK[i+NUM_SEG-1][1] = time.time()
 
                 #if we detect a loss we resend the lost segment
-                elif((Tab_ACK[i+NUM_SEG - 1][0] == 0) and ((time.time() - Tab_ACK[i+NUM_SEG-1][1] > RTT) or Tab_ACK[i+NUM_SEG-2][0] > 3)):
-                    print("loss detected")
-                    print("send : ", i+NUM_SEG)
-                    sock_client.sendto(Tab_ACK[i+NUM_SEG-1][2], address)
-                    Tab_ACK[i+NUM_SEG-1][1] = time.time()
-                    ssthresh = 0
+            elif((Tab_ACK[i+NUM_SEG - 1][0] == 0) and ((time.time() - Tab_ACK[i+NUM_SEG-1][1] > RTT) or Tab_ACK[i+NUM_SEG-2][0] > 3)):
+                print("loss detected")
+                print("send : ", i+NUM_SEG)
+                sock_client.sendto(Tab_ACK[i+NUM_SEG-1][2], address)
+                Tab_ACK[i+NUM_SEG-1][1] = time.time()
+                ssthresh = 0
 
-                    #we actualize the window size
-                    for j in range(int(cwnd)):
-                        if((j+NUM_SEG) > len(Tab_ACK)):
-                            break
-                        if (Tab_ACK[j+NUM_SEG - 1][3] == True and Tab_ACK[j+NUM_SEG - 1][0] == 0):
-                            ssthresh += 1
-                    ssthresh = ssthresh/2
-                    print("--------ssthresh = ", ssthresh)
-                    cwnd = int(ssthresh) if ssthresh > 5 else 5
-                    break
+                #we actualize the window size
+                for j in range(int(cwnd)):
+                    if((j+NUM_SEG) > len(Tab_ACK)):
+                        break
+                    if (Tab_ACK[j+NUM_SEG - 1][3] == True and Tab_ACK[j+NUM_SEG - 1][0] == 0):
+                        ssthresh += 1
+                ssthresh = ssthresh/2
+                print("--------ssthresh = ", ssthresh)
+                cwnd = int(ssthresh) if ssthresh > 5 else 5
+                break
 
         #if we received an ACK for the last segment, that means we reached the end
-        with Tab_ACK_lock:
-            Last_Segment = Tab_ACK[len(Tab_ACK) - 1][0]
+        Last_Segment = Tab_ACK[len(Tab_ACK) - 1][0]
 
     # when we reach the end of the content we send a message "FIN" to the client to end the communication
     MESSAGE_FIN = bytes("FIN", 'utf-8')
