@@ -5,8 +5,6 @@ from sys import argv
 import statistics
 from math import floor
 
-Tab_ACK_lock = threading.Lock()
-RTT_lock = threading.Lock()
 
 def listen(sock_client, ACK_tab):
     while(1):
