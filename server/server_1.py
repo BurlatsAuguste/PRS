@@ -2,7 +2,6 @@ import socket
 import threading
 import time
 from sys import argv
-import statistics
 from math import floor
 
 
