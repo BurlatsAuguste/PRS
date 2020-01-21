@@ -12,8 +12,9 @@ def listen(sock_client, ACK_tab):
         print("received :", data_ack.decode('utf-8'))
         message = data_ack.decode('utf-8').rstrip('\0')
         index = int(message[3::])
-        for i in range(index):
-            ACK_tab[i][0] += 1
+        for i in range(240):
+            if((index-240)+i >=0):
+                ACK_tab[(index-240)+i][0] += 1
 
 
 def send_file(socket_port, packet_length):
@@ -22,7 +23,7 @@ def send_file(socket_port, packet_length):
     sock_client.bind((UDP_IP, socket_port))
 
     RTT = 0.05
-    cwnd = 10 #window size
+    cwnd = 120 #window size
     Tab_ACK = []
 
     # file initialization
@@ -70,7 +71,7 @@ def send_file(socket_port, packet_length):
                 Tab_ACK[i+NUM_SEG-1][3] += 1
                 Tab_ACK[i+NUM_SEG-1][1] = time.time()
 
-                #if we detect a loss we resend the lost segment
+            #if we detect a loss we resend the lost segment
             elif((Tab_ACK[i+NUM_SEG - 1][0] == 0) and ((time.time() - Tab_ACK[i+NUM_SEG-1][1] > RTT) or (Tab_ACK[i+NUM_SEG-2][0] > 3 and Tab_ACK[i+NUM_SEG-1][3] < 2))):
                 print("loss detected")
                 print("send : ", i+NUM_SEG)
